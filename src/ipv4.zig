@@ -141,29 +141,35 @@ pub const IPv4Header = struct {
     }
 
     /// Dump header information for debugging
-    pub fn dump(self: IPv4Header, writer: anytype) !void {
-        try writer.writeAll("IPv4 Header:\n");
-        try writer.print("  Version: {}\n", .{self.version});
-        try writer.print("  IHL: {} ({} bytes)\n", .{ self.ihl, self.headerLength() });
-        try writer.print("  DSCP: 0x{x:0>2}, ECN: 0x{x}\n", .{ self.dscp, self.ecn });
-        try writer.print("  Total Length: {} bytes\n", .{self.total_length});
-        try writer.print("  Identification: 0x{x:0>4}\n", .{self.identification});
-        try writer.print("  Flags: DF={}, MF={}\n", .{
+    pub fn dump(self: IPv4Header) void {
+        std.debug.print("IPv4 Header:\n", .{});
+        std.debug.print("  Version: {}\n", .{self.version});
+        std.debug.print("  IHL: {} ({} bytes)\n", .{ self.ihl, self.headerLength() });
+        std.debug.print("  DSCP: 0x{x:0>2}, ECN: 0x{x}\n", .{ self.dscp, self.ecn });
+        std.debug.print("  Total Length: {} bytes\n", .{self.total_length});
+        std.debug.print("  Identification: 0x{x:0>4}\n", .{self.identification});
+        std.debug.print("  Flags: DF={}, MF={}\n", .{
             self.flags.dont_fragment,
-            self.flags.more_fragments
+            self.flags.more_fragments,
         });
-        try writer.print("  Fragment Offset: {}\n", .{self.fragment_offset});
-        try writer.print("  TTL: {}\n", .{self.ttl});
-        try writer.print("  Protocol: {} ({})\n", .{ self.protocol, protocolName(self.protocol) });
-        try writer.print("  Checksum: 0x{x:0>4}\n", .{self.checksum});
-        try writer.writeAll("  Source: ");
-        try self.formatSource(writer);
-        try writer.writeAll("\n");
-        try writer.writeAll("  Destination: ");
-        try self.formatDestination(writer);
-        try writer.writeAll("\n");
+        std.debug.print("  Fragment Offset: {}\n", .{self.fragment_offset});
+        std.debug.print("  TTL: {}\n", .{self.ttl});
+        std.debug.print("  Protocol: {} ({s})\n", .{ self.protocol, protocolName(self.protocol) });
+        std.debug.print("  Checksum: 0x{x:0>4}\n", .{self.checksum});
+        std.debug.print("  Source: {}.{}.{}.{}\n", .{
+            self.source[0],
+            self.source[1],
+            self.source[2],
+            self.source[3],
+        });
+        std.debug.print("  Destination: {}.{}.{}.{}\n", .{
+            self.destination[0],
+            self.destination[1],
+            self.destination[2],
+            self.destination[3],
+        });
         if (self.options.len > 0) {
-            try writer.print("  Options: {} bytes\n", .{self.options.len});
+            std.debug.print("  Options: {} bytes\n", .{self.options.len});
         }
     }
 };
