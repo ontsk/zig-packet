@@ -1,0 +1,24 @@
+# Zig build artifacts
+.zig-cache/
+zig-out/
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Claude AI assistant
+.claude/
+
+# ZLS (Zig Language Server) config
+zls.json
+
+# Debugging
+*.dSYM/
+*.pdb
+
+# Test artifacts
+test-results/
