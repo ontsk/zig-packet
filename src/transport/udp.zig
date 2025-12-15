@@ -25,12 +25,12 @@ pub const UDPHeader = struct {
         return if (self.length >= 8) self.length - 8 else 0;
     }
 
-    pub fn dump(self: UDPHeader, writer: anytype) !void {
-        try writer.writeAll("UDP Header:\n");
-        try writer.print("  Source Port: {}\n", .{self.source_port});
-        try writer.print("  Destination Port: {}\n", .{self.destination_port});
-        try writer.print("  Length: {} bytes\n", .{self.length});
-        try writer.print("  Checksum: 0x{x:0>4}\n", .{self.checksum});
-        try writer.print("  Payload Length: {} bytes\n", .{self.payloadLength()});
+    pub fn dump(self: UDPHeader) void {
+        std.debug.print("UDP Header:\n", .{});
+        std.debug.print("  Source Port: {}\n", .{self.source_port});
+        std.debug.print("  Destination Port: {}\n", .{self.destination_port});
+        std.debug.print("  Length: {} bytes\n", .{self.length});
+        std.debug.print("  Checksum: 0x{x:0>4}\n", .{self.checksum});
+        std.debug.print("  Payload Length: {} bytes\n", .{self.payloadLength()});
     }
 };

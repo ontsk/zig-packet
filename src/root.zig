@@ -5,20 +5,25 @@
 
 const std = @import("std");
 
-// Core modules
-pub const ipv4 = @import("ipv4.zig");
-pub const ipv6 = @import("ipv6.zig");
-pub const tcp = @import("tcp.zig");
-pub const udp = @import("udp.zig");
-pub const icmp = @import("icmp.zig");
-pub const ethernet = @import("ethernet.zig");
+// Layer 2 - Link Layer
+pub const ethernet = @import("link/ethernet.zig");
 
-// Re-export commonly used types
+// Layer 3 - Network Layer (net/)
+pub const ipv4 = @import("net/ipv4.zig");
+pub const ipv6 = @import("net/ipv6.zig");
+pub const icmp = @import("net/icmp.zig");
+
+// Layer 4 - Transport Layer
+pub const tcp = @import("transport/tcp.zig");
+pub const udp = @import("transport/udp.zig");
+
+// Re-export commonly used types for convenience
+pub const EthernetHeader = ethernet.EthernetHeader;
 pub const IPv4Header = ipv4.IPv4Header;
+pub const IPv6Header = ipv6.IPv6Header;
+pub const ICMPHeader = icmp.ICMPHeader;
 pub const TCPHeader = tcp.TCPHeader;
 pub const UDPHeader = udp.UDPHeader;
-pub const ICMPHeader = icmp.ICMPHeader;
-pub const EthernetHeader = ethernet.EthernetHeader;
 
 // Common error type
 pub const ParseError = error{
