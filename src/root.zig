@@ -17,6 +17,21 @@ pub const icmp = @import("net/icmp.zig");
 pub const tcp = @import("transport/tcp.zig");
 pub const udp = @import("transport/udp.zig");
 
+// Application Layer Protocols
+pub const dns = @import("dns.zig");
+
+// Stream Processing (stateful, requires allocator)
+pub const reassembly = struct {
+    pub const Assembler = @import("reassembly/assembler.zig").Assembler;
+    pub const Event = @import("reassembly/assembler.zig").Event;
+    pub const EndReason = @import("reassembly/assembler.zig").EndReason;
+    pub const Config = @import("reassembly/assembler.zig").Config;
+    pub const PagePool = @import("reassembly/page.zig").PagePool;
+    pub const Page = @import("reassembly/page.zig").Page;
+    pub const Connection = @import("reassembly/connection.zig").Connection;
+    pub const HalfConnection = @import("reassembly/connection.zig").HalfConnection;
+};
+
 // Re-export commonly used types for convenience
 pub const EthernetHeader = ethernet.EthernetHeader;
 pub const IPv4Header = ipv4.IPv4Header;
@@ -24,6 +39,17 @@ pub const IPv6Header = ipv6.IPv6Header;
 pub const ICMPHeader = icmp.ICMPHeader;
 pub const TCPHeader = tcp.TCPHeader;
 pub const UDPHeader = udp.UDPHeader;
+
+// TCP flow tracking types
+pub const Flow = tcp.Flow;
+pub const SeqNum = tcp.SeqNum;
+
+// DNS types
+pub const DNSHeader = dns.DNSHeader;
+pub const DNSMessage = dns.DNSMessage;
+pub const DNSQuestion = dns.DNSQuestion;
+pub const DNSResourceRecord = dns.DNSResourceRecord;
+pub const DNSName = dns.DNSName;
 
 // Common error type
 pub const ParseError = error{
@@ -74,4 +100,12 @@ pub const EtherType = enum(u16) {
 
 test "import all modules" {
     std.testing.refAllDecls(@This());
+
+    // Import reassembly tests
+    _ = @import("reassembly/page.zig");
+    _ = @import("reassembly/connection.zig");
+    _ = @import("reassembly/assembler.zig");
+
+    // Import DNS tests
+    _ = @import("dns.zig");
 }

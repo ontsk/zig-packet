@@ -1,7 +1,222 @@
-//! TCP header parsing
+//! TCP header parsing and utilities
 //! Based on RFC 793
 
 const std = @import("std");
+
+// ============================================================================
+// Flow Identification (stateless utilities for connection tracking)
+// ============================================================================
+
+/// 5-tuple flow identifier for TCP connections.
+/// Supports both IPv4 (as v6-mapped) and native IPv6 addresses.
+/// This is a stateless utility - no allocations, suitable for use as hash key.
+pub const Flow = struct {
+    src_addr: [16]u8, // IPv4 stored as v6-mapped (::ffff:x.x.x.x) or native IPv6
+    dst_addr: [16]u8,
+    src_port: u16,
+    dst_port: u16,
+    is_ipv6: bool,
+
+    /// Create a flow from IPv4 addresses
+    pub fn fromIPv4(
+        src_addr: [4]u8,
+        dst_addr: [4]u8,
+        src_port: u16,
+        dst_port: u16,
+    ) Flow {
+        return .{
+            .src_addr = mapIPv4toIPv6(src_addr),
+            .dst_addr = mapIPv4toIPv6(dst_addr),
+            .src_port = src_port,
+            .dst_port = dst_port,
+            .is_ipv6 = false,
+        };
+    }
+
+    /// Create a flow from IPv6 addresses
+    pub fn fromIPv6(
+        src_addr: [16]u8,
+        dst_addr: [16]u8,
+        src_port: u16,
+        dst_port: u16,
+    ) Flow {
+        return .{
+            .src_addr = src_addr,
+            .dst_addr = dst_addr,
+            .src_port = src_port,
+            .dst_port = dst_port,
+            .is_ipv6 = true,
+        };
+    }
+
+    /// Returns the reverse flow (swap src/dst)
+    pub fn reverse(self: Flow) Flow {
+        return .{
+            .src_addr = self.dst_addr,
+            .dst_addr = self.src_addr,
+            .src_port = self.dst_port,
+            .dst_port = self.src_port,
+            .is_ipv6 = self.is_ipv6,
+        };
+    }
+
+    /// Hash function for use in hash maps
+    pub fn hash(self: Flow) u64 {
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(&self.src_addr);
+        hasher.update(&self.dst_addr);
+        hasher.update(std.mem.asBytes(&self.src_port));
+        hasher.update(std.mem.asBytes(&self.dst_port));
+        return hasher.final();
+    }
+
+    /// Equality check for use in hash maps
+    pub fn eql(self: Flow, other: Flow) bool {
+        return std.mem.eql(u8, &self.src_addr, &other.src_addr) and
+            std.mem.eql(u8, &self.dst_addr, &other.dst_addr) and
+            self.src_port == other.src_port and
+            self.dst_port == other.dst_port;
+    }
+
+    /// HashMap context for std.HashMap
+    pub const HashContext = struct {
+        pub fn hash(_: HashContext, flow: Flow) u64 {
+            return flow.hash();
+        }
+
+        pub fn eql(_: HashContext, a: Flow, b: Flow) bool {
+            return a.eql(b);
+        }
+    };
+
+    /// Convert IPv4 address to IPv6-mapped format (::ffff:x.x.x.x)
+    fn mapIPv4toIPv6(ipv4: [4]u8) [16]u8 {
+        return .{
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0xff, 0xff, // IPv6-mapped prefix
+            ipv4[0], ipv4[1], ipv4[2], ipv4[3],
+        };
+    }
+
+    /// Extract IPv4 address if this is an IPv4 flow
+    pub fn getIPv4Src(self: Flow) ?[4]u8 {
+        if (self.is_ipv6) return null;
+        return .{ self.src_addr[12], self.src_addr[13], self.src_addr[14], self.src_addr[15] };
+    }
+
+    /// Extract IPv4 address if this is an IPv4 flow
+    pub fn getIPv4Dst(self: Flow) ?[4]u8 {
+        if (self.is_ipv6) return null;
+        return .{ self.dst_addr[12], self.dst_addr[13], self.dst_addr[14], self.dst_addr[15] };
+    }
+
+    /// Format the flow for debugging
+    pub fn format(
+        self: Flow,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        if (self.is_ipv6) {
+            try writer.print("[{x}:{x}:{x}:{x}:{x}:{x}:{x}:{x}]:{} -> [{x}:{x}:{x}:{x}:{x}:{x}:{x}:{x}]:{}", .{
+                std.mem.readInt(u16, self.src_addr[0..2], .big),
+                std.mem.readInt(u16, self.src_addr[2..4], .big),
+                std.mem.readInt(u16, self.src_addr[4..6], .big),
+                std.mem.readInt(u16, self.src_addr[6..8], .big),
+                std.mem.readInt(u16, self.src_addr[8..10], .big),
+                std.mem.readInt(u16, self.src_addr[10..12], .big),
+                std.mem.readInt(u16, self.src_addr[12..14], .big),
+                std.mem.readInt(u16, self.src_addr[14..16], .big),
+                self.src_port,
+                std.mem.readInt(u16, self.dst_addr[0..2], .big),
+                std.mem.readInt(u16, self.dst_addr[2..4], .big),
+                std.mem.readInt(u16, self.dst_addr[4..6], .big),
+                std.mem.readInt(u16, self.dst_addr[6..8], .big),
+                std.mem.readInt(u16, self.dst_addr[8..10], .big),
+                std.mem.readInt(u16, self.dst_addr[10..12], .big),
+                std.mem.readInt(u16, self.dst_addr[12..14], .big),
+                std.mem.readInt(u16, self.dst_addr[14..16], .big),
+                self.dst_port,
+            });
+        } else {
+            const src = self.getIPv4Src().?;
+            const dst = self.getIPv4Dst().?;
+            try writer.print("{}.{}.{}.{}:{} -> {}.{}.{}.{}:{}", .{
+                src[0], src[1], src[2], src[3], self.src_port,
+                dst[0], dst[1], dst[2], dst[3], self.dst_port,
+            });
+        }
+    }
+};
+
+// ============================================================================
+// Sequence Number Arithmetic (handles 32-bit wraparound per RFC 793)
+// ============================================================================
+
+/// TCP sequence number with proper wraparound arithmetic.
+/// TCP sequence numbers are 32-bit and wrap around, requiring special
+/// comparison logic (RFC 793 Section 3.3).
+pub const SeqNum = struct {
+    value: u32,
+
+    /// Create a SeqNum from a raw u32 value
+    pub fn init(value: u32) SeqNum {
+        return .{ .value = value };
+    }
+
+    /// Calculate signed difference between two sequence numbers.
+    /// Handles 32-bit wraparound correctly.
+    /// Returns positive if self > other, negative if self < other.
+    pub fn diff(self: SeqNum, other: SeqNum) i33 {
+        // Two's complement subtraction handles wraparound
+        const raw_diff: i32 = @bitCast(self.value -% other.value);
+        return @as(i33, raw_diff);
+    }
+
+    /// Check if self < other (with wraparound handling)
+    pub fn lessThan(self: SeqNum, other: SeqNum) bool {
+        return self.diff(other) < 0;
+    }
+
+    /// Check if self <= other (with wraparound handling)
+    pub fn lessThanOrEqual(self: SeqNum, other: SeqNum) bool {
+        return self.diff(other) <= 0;
+    }
+
+    /// Check if self > other (with wraparound handling)
+    pub fn greaterThan(self: SeqNum, other: SeqNum) bool {
+        return self.diff(other) > 0;
+    }
+
+    /// Check if self >= other (with wraparound handling)
+    pub fn greaterThanOrEqual(self: SeqNum, other: SeqNum) bool {
+        return self.diff(other) >= 0;
+    }
+
+    /// Add an offset to the sequence number (wraps around)
+    pub fn add(self: SeqNum, offset: u32) SeqNum {
+        return .{ .value = self.value +% offset };
+    }
+
+    /// Subtract an offset from the sequence number (wraps around)
+    pub fn sub(self: SeqNum, offset: u32) SeqNum {
+        return .{ .value = self.value -% offset };
+    }
+
+    /// Format for debugging
+    pub fn format(
+        self: SeqNum,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try writer.print("{}", .{self.value});
+    }
+};
+
+// ============================================================================
+// TCP Option Constants and Types
+// ============================================================================
 
 pub const OptionKind = struct {
     pub const END: u8 = 0;
@@ -599,4 +814,123 @@ test "TCPOptionsIterator - Multiple options" {
 
     const opt5 = try iter.next();
     try std.testing.expect(opt5 == null); // END
+}
+
+// ============================================================================
+// Flow and SeqNum Tests
+// ============================================================================
+
+test "Flow - IPv4 creation and reverse" {
+    const flow = Flow.fromIPv4(
+        .{ 192, 168, 1, 1 },
+        .{ 10, 0, 0, 1 },
+        12345,
+        80,
+    );
+
+    try std.testing.expectEqual(@as(u16, 12345), flow.src_port);
+    try std.testing.expectEqual(@as(u16, 80), flow.dst_port);
+    try std.testing.expect(!flow.is_ipv6);
+
+    const src = flow.getIPv4Src().?;
+    try std.testing.expectEqual(@as(u8, 192), src[0]);
+    try std.testing.expectEqual(@as(u8, 168), src[1]);
+    try std.testing.expectEqual(@as(u8, 1), src[2]);
+    try std.testing.expectEqual(@as(u8, 1), src[3]);
+
+    const reversed = flow.reverse();
+    try std.testing.expectEqual(@as(u16, 80), reversed.src_port);
+    try std.testing.expectEqual(@as(u16, 12345), reversed.dst_port);
+
+    const rev_src = reversed.getIPv4Src().?;
+    try std.testing.expectEqual(@as(u8, 10), rev_src[0]);
+    try std.testing.expectEqual(@as(u8, 0), rev_src[1]);
+    try std.testing.expectEqual(@as(u8, 0), rev_src[2]);
+    try std.testing.expectEqual(@as(u8, 1), rev_src[3]);
+}
+
+test "Flow - IPv6 creation" {
+    const src_addr = [16]u8{ 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
+    const dst_addr = [16]u8{ 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2 };
+
+    const flow = Flow.fromIPv6(src_addr, dst_addr, 443, 8080);
+
+    try std.testing.expect(flow.is_ipv6);
+    try std.testing.expectEqual(@as(u16, 443), flow.src_port);
+    try std.testing.expectEqual(@as(u16, 8080), flow.dst_port);
+    try std.testing.expect(flow.getIPv4Src() == null); // Not IPv4
+}
+
+test "Flow - hash and equality" {
+    const flow1 = Flow.fromIPv4(.{ 192, 168, 1, 1 }, .{ 10, 0, 0, 1 }, 12345, 80);
+    const flow2 = Flow.fromIPv4(.{ 192, 168, 1, 1 }, .{ 10, 0, 0, 1 }, 12345, 80);
+    const flow3 = Flow.fromIPv4(.{ 192, 168, 1, 2 }, .{ 10, 0, 0, 1 }, 12345, 80);
+
+    try std.testing.expect(flow1.eql(flow2));
+    try std.testing.expect(!flow1.eql(flow3));
+    try std.testing.expectEqual(flow1.hash(), flow2.hash());
+    try std.testing.expect(flow1.hash() != flow3.hash());
+}
+
+test "Flow - HashMap integration" {
+    var map = std.HashMap(Flow, u32, Flow.HashContext, 80).init(std.testing.allocator);
+    defer map.deinit();
+
+    const flow1 = Flow.fromIPv4(.{ 192, 168, 1, 1 }, .{ 10, 0, 0, 1 }, 12345, 80);
+    const flow2 = Flow.fromIPv4(.{ 192, 168, 1, 2 }, .{ 10, 0, 0, 1 }, 12346, 80);
+
+    try map.put(flow1, 100);
+    try map.put(flow2, 200);
+
+    try std.testing.expectEqual(@as(u32, 100), map.get(flow1).?);
+    try std.testing.expectEqual(@as(u32, 200), map.get(flow2).?);
+}
+
+test "SeqNum - basic operations" {
+    const seq1 = SeqNum.init(1000);
+    const seq2 = SeqNum.init(2000);
+
+    try std.testing.expect(seq1.lessThan(seq2));
+    try std.testing.expect(seq2.greaterThan(seq1));
+    try std.testing.expect(!seq1.greaterThan(seq2));
+    try std.testing.expect(seq1.lessThanOrEqual(seq2));
+    try std.testing.expect(seq2.greaterThanOrEqual(seq1));
+}
+
+test "SeqNum - wraparound comparison" {
+    // Test wraparound: 0xFFFFFF00 should be "less than" 0x00000100
+    // because 0x00000100 is "ahead" in the sequence space
+    const near_max = SeqNum.init(0xFFFFFF00);
+    const after_wrap = SeqNum.init(0x00000100);
+
+    // after_wrap is 512 bytes ahead of near_max (with wraparound)
+    try std.testing.expect(near_max.lessThan(after_wrap));
+    try std.testing.expect(after_wrap.greaterThan(near_max));
+
+    // Difference should be positive (after_wrap - near_max = 512)
+    const diff = after_wrap.diff(near_max);
+    try std.testing.expectEqual(@as(i33, 512), diff);
+}
+
+test "SeqNum - add and subtract" {
+    const seq = SeqNum.init(100);
+
+    const added = seq.add(50);
+    try std.testing.expectEqual(@as(u32, 150), added.value);
+
+    const subtracted = seq.sub(50);
+    try std.testing.expectEqual(@as(u32, 50), subtracted.value);
+
+    // Test wraparound add
+    const near_max = SeqNum.init(0xFFFFFFF0);
+    const wrapped = near_max.add(0x20);
+    try std.testing.expectEqual(@as(u32, 0x10), wrapped.value);
+}
+
+test "SeqNum - diff calculation" {
+    const a = SeqNum.init(1000);
+    const b = SeqNum.init(500);
+
+    try std.testing.expectEqual(@as(i33, 500), a.diff(b)); // a - b = 500
+    try std.testing.expectEqual(@as(i33, -500), b.diff(a)); // b - a = -500
 }
